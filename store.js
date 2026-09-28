@@ -2,6 +2,8 @@ import { initialRecords, categories, sentiments } from './data.js?v=3';
 
 const KEY = 'koala-universe.records.v1';
 const BACKUP_KEY = 'koala-universe.recovery.v1';
+const MIGRATION_KEY = 'koala-universe.pending-cloud-migration.v1';
+const CLOUD_LINKED_KEY = 'koala-universe.cloud-linked.v1';
 const CONTENT_REVISION = 2;
 const categoryIds = new Set(categories.map(category => category.id));
 const bounded = (value, max) => typeof value === 'string' && value.length <= max;
@@ -71,4 +73,33 @@ export function mergeBackup(current, incoming) {
     if (!previous || Date.parse(record.updatedAt || '1970-01-01') > Date.parse(previous.updatedAt || '1970-01-01')) map.set(record.id, record);
   }
   return validateRecords([...map.values()]);
+}
+
+export function loadLocalMigrationCandidates() {
+  try {
+    const pending = localStorage.getItem(MIGRATION_KEY);
+    if (pending) return validateRecords(JSON.parse(pending).records);
+    if (localStorage.getItem(CLOUD_LINKED_KEY) === '1') return [];
+    const candidates = [KEY, BACKUP_KEY].map(key => {
+      try {
+        const saved = localStorage.getItem(key);
+        return saved ? validateRecords(JSON.parse(saved).records) : [];
+      } catch { return []; }
+    });
+    return mergeBackup(candidates[0], candidates[1]);
+  } catch { return []; }
+}
+
+export function retainLocalMigration(records) {
+  try {
+    localStorage.setItem(MIGRATION_KEY, JSON.stringify({ version: 1, records: validateRecords(records) }));
+    return true;
+  } catch { return false; }
+}
+
+export function finishLocalMigration() {
+  try {
+    localStorage.setItem(CLOUD_LINKED_KEY, '1');
+    localStorage.removeItem(MIGRATION_KEY);
+  } catch { /* The cloud copy is authoritative even if this browser blocks storage. */ }
 }

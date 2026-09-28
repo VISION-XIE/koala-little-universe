@@ -1,14 +1,18 @@
 import { categories, categoryById, initialRecords, sentiments, matchesQuery, suggestCategory } from './data.js?v=3';
-import { loadRecords, persistRecords, readBackup, mergeBackup, validateRecords } from './store.js?v=3';
+import { loadRecords, persistRecords, readBackup, mergeBackup, validateRecords, loadLocalMigrationCandidates, retainLocalMigration, finishLocalMigration } from './store.js?v=4';
 import { icon, escapeHtml as esc } from './icons.js';
+import { fetchCloudRecords, checkAdmin, saveCloudRecords } from './api.js?v=4';
 
 const loaded = loadRecords();
-const state = { records: loaded.records, view: 'universe', filter: 'all', query: '', lastCategory: null, saved: !loaded.warning };
+let rememberedToken = '';
+try { rememberedToken = sessionStorage.getItem('koala-universe.admin-token') || ''; } catch { /* Private browsing may disable storage. */ }
+const state = { records: loaded.records, view: 'universe', filter: 'all', query: '', lastCategory: null, cloudRevision: null, admin: false, adminToken: rememberedToken, cloudStatus: '正在连接云端…', migrationRecords: null };
 const app = document.querySelector('#app');
 let toastTimer, hoverTimer, mascotTimer, suggestionIndex = 0;
 let editorCategoryTouched = false;
 let undoRecord = null;
 let hoverSource = null;
+let pendingAdminAction = null;
 const count = id => state.records.filter(record => record.category === id).length;
 
 app.innerHTML = `
@@ -18,14 +22,120 @@ app.innerHTML = `
     <div class="header-actions"><label class="search-box">${icon('search')}<input id="search" type="search" placeholder="搜索老大的小喜好…" aria-label="搜索老大的小喜好" autocomplete="off"><kbd>/</kbd></label><button class="button primary add-button" data-action="new">${icon('plus')}<span>记一件小事</span></button></div>
   </header>
   <main id="main"></main>
-  <footer class="site-footer"><span class="footer-love">${icon('heart')}偏爱，藏在每个小细节里。</span><button class="save-state" data-action="privacy">${icon('lock')}<span id="save-label">${state.saved ? '已保存在此浏览器' : '暂未保存 · 请导出备份'}</span></button></footer>
+  <footer class="site-footer"><span class="footer-love">${icon('heart')}偏爱，藏在每个小细节里。</span><div class="footer-actions"><button class="save-state" data-action="privacy">${icon('lock')}<span id="save-label">正在连接云端…</span></button><button class="save-state" data-action="admin"><span id="admin-label">管理员登录</span></button></div></footer>
   <div id="hover-preview" class="hover-preview" role="tooltip" hidden></div>
   <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title"></dialog>
   <dialog id="editor-dialog" class="editor-dialog" aria-labelledby="editor-title"></dialog>
   <dialog id="confirm-dialog" class="small-dialog" aria-labelledby="confirm-title"></dialog>
   <dialog id="privacy-dialog" class="small-dialog" aria-labelledby="privacy-title"></dialog>
+  <dialog id="admin-dialog" class="small-dialog" aria-labelledby="admin-title"></dialog>
   <input id="import-file" type="file" accept="application/json,.json" hidden>
 `;
+
+function updateCloudLabel() {
+  document.querySelector('#save-label').textContent = state.cloudStatus;
+  document.querySelector('#admin-label').textContent = state.admin ? '退出管理' : '管理员登录';
+}
+
+async function connectCloud() {
+  state.cloudStatus = '正在连接云端…';
+  updateCloudLabel();
+  try {
+    const response = await fetchCloudRecords();
+    const cloudRecords = validateRecords(response.records);
+    if (!Number.isSafeInteger(response.revision) || response.revision < 1) throw new Error('云端记录版本不正确。');
+    const cloudById = new Map(cloudRecords.map(record => [record.id, record]));
+    const candidates = loadLocalMigrationCandidates();
+    const localChanges = candidates.filter(record => record.updatedAt && (
+      !cloudById.has(record.id) ||
+      Date.parse(record.updatedAt) > Date.parse(cloudById.get(record.id).updatedAt || '1970-01-01')
+    ));
+    state.migrationRecords = localChanges.length ? candidates : null;
+    if (state.migrationRecords) retainLocalMigration(candidates);
+    else finishLocalMigration();
+    state.records = cloudRecords;
+    state.cloudRevision = response.revision;
+    state.cloudStatus = '已连接云端 · 自动保存';
+    persistRecords(cloudRecords);
+    updateCloudLabel();
+    renderContent();
+    if (state.migrationRecords) notify(`发现 ${localChanges.length} 条旧浏览器记录，可以导入云端。`, { label: '导入旧记录', action: 'import-local' }, 12000);
+    if (state.adminToken) {
+      try { await checkAdmin(state.adminToken); state.admin = true; }
+      catch { state.adminToken = ''; try { sessionStorage.removeItem('koala-universe.admin-token'); } catch {} }
+      updateCloudLabel();
+    }
+  } catch (error) {
+    state.cloudRevision = null;
+    state.cloudStatus = '云端暂不可用 · 只读缓存';
+    updateCloudLabel();
+    notify(error.message || '云端暂时无法连接，请稍后重试。', { label: '重试', action: 'retry-cloud' }, 10000);
+  }
+}
+
+function showAdmin(afterLogin = null) {
+  if (state.cloudRevision === null) { notify('请先连接云端，再进入管理模式。', { label: '重试', action: 'retry-cloud' }); return; }
+  pendingAdminAction = afterLogin;
+  const dialog = document.querySelector('#admin-dialog');
+  dialog.innerHTML = `<form id="admin-form"><div class="small-dialog-body"><button type="button" class="icon-button close-button" data-action="close" aria-label="关闭管理登录">${icon('close')}</button><span class="small-illustration" aria-hidden="true">🔐</span><h2 id="admin-title">只有你能写进小宇宙</h2><p>访客可以浏览记录，添加、编辑和删除需要管理密钥。</p><label class="field"><span>管理密钥</span><input name="token" type="password" required autocomplete="off" placeholder="输入你的管理密钥"></label><p id="admin-error" class="form-error" role="alert" hidden></p></div><div class="dialog-footer"><button type="submit" class="button primary">进入管理模式</button></div></form>`;
+  dialog.showModal();
+  dialog.querySelector('input').focus();
+  dialog.querySelector('form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    const token = form.elements.token.value.trim();
+    button.disabled = true;
+    try {
+      await checkAdmin(token);
+      state.adminToken = token;
+      state.admin = true;
+      try { sessionStorage.setItem('koala-universe.admin-token', token); } catch {}
+      updateCloudLabel();
+      dialog.close();
+      const action = pendingAdminAction;
+      pendingAdminAction = null;
+      notify('管理模式已开启，修改会保存到云端 ♡');
+      action?.();
+    } catch (error) {
+      const message = dialog.querySelector('#admin-error');
+      message.textContent = error.message || '管理密钥不正确。';
+      message.hidden = false;
+    } finally { button.disabled = false; }
+  });
+}
+
+function withAdmin(action) {
+  if (state.cloudRevision === null) { notify('云端暂不可用，暂时不能修改记录。', { label: '重试', action: 'retry-cloud' }); return; }
+  if (!state.admin) { showAdmin(action); return; }
+  action();
+}
+
+function logoutAdmin() {
+  state.admin = false;
+  state.adminToken = '';
+  try { sessionStorage.removeItem('koala-universe.admin-token'); } catch {}
+  updateCloudLabel();
+  notify('已退出管理模式，记录仍安全保存在云端。');
+}
+
+async function saveRecords(nextRecords) {
+  try {
+    const clean = validateRecords(nextRecords);
+    const response = await saveCloudRecords(clean, state.cloudRevision, state.adminToken);
+    state.records = validateRecords(response.records);
+    state.cloudRevision = response.revision;
+    state.cloudStatus = '已保存到云端';
+    persistRecords(state.records);
+    updateCloudLabel();
+    renderContent();
+    return true;
+  } catch (error) {
+    if (error.status === 401) logoutAdmin();
+    notify(error.message || '云端保存失败，请稍后再试。', { label: '导出备份', action: 'export' }, 10000);
+    return false;
+  }
+}
 
 function categorySummary(category) {
   const records = state.records.filter(record => record.category === category.id);
@@ -66,7 +176,7 @@ function universeView() {
 function recordsView() {
   const results = state.records.filter(record => (state.filter === 'all' || record.category === state.filter) && matchesQuery(record, state.query));
   const searching = Boolean(state.query.trim());
-  return `<section class="page-intro records-intro"><div><h1>${searching ? '找找老大的小喜好' : '关于老大，都记在这里'}<span class="heading-heart" aria-hidden="true">♥</span></h1><p>${searching ? `找到 ${results.length} 条与「${esc(state.query)}」有关的记录` : `${state.records.length} 件被认真记住的小事，和慢慢了解老大的日常。`}</p></div><div class="backup-actions"><button class="button subtle" data-action="export">${icon('download')}导出备份</button><button class="button subtle" data-action="import">${icon('upload')}导入</button></div></section>
+  return `<section class="page-intro records-intro"><div><h1>${searching ? '找找老大的小喜好' : '关于老大，都记在这里'}<span class="heading-heart" aria-hidden="true">♥</span></h1><p>${searching ? `找到 ${results.length} 条与「${esc(state.query)}」有关的记录` : `${state.records.length} 件被认真记住的小事，和慢慢了解老大的日常。`}</p></div><div class="backup-actions"><button class="button subtle" data-action="export">${icon('download')}导出备份</button><button class="button subtle" data-action="import">${icon('upload')}导入备份</button>${state.migrationRecords ? `<button class="button subtle" data-action="import-local">${icon('upload')}导入旧浏览器记录</button>` : ''}</div></section>
     <div class="filters" aria-label="记录分类"><button class="filter ${state.filter === 'all' ? 'selected' : ''}" data-action="filter" data-filter="all" aria-pressed="${state.filter === 'all'}">全部 <span>${state.records.length}</span></button>${categories.map(category => `<button class="filter ${state.filter === category.id ? 'selected' : ''}" data-action="filter" data-filter="${category.id}" aria-pressed="${state.filter === category.id}">${category.emoji} ${category.name} <span>${count(category.id)}</span></button>`).join('')}</div>
     <section class="records-grid" aria-label="喜好记录" aria-live="polite">${results.length ? results.map(record => recordCard(record)).join('') : `<div class="empty-state"><span aria-hidden="true">${searching ? '🔎' : '🌱'}</span><h2>${searching ? '这件小事，还没找到' : '这里等着一个新发现'}</h2><p>${searching ? '换个关键词，或者把这个新发现记下来。' : '老大的小习惯、喜欢的事，都可以从这里开始。'}</p><button class="button primary" data-action="${searching ? 'clear-search' : 'new'}" ${!searching && state.filter !== 'all' ? `data-category="${state.filter}"` : ''}>${icon(searching ? 'search' : 'plus')}${searching ? '清除搜索与筛选' : '记一件小事'}</button></div>`}</section>`;
 }
@@ -95,7 +205,7 @@ function showEditor(record = null, categoryId = '') {
   editorCategoryTouched = Boolean(record || categoryId);
   const category = record?.category || categoryId || 'habits';
   const dialog = document.querySelector('#editor-dialog');
-  dialog.innerHTML = `<form id="record-form"><header class="dialog-header"><div><span class="form-eyebrow">${icon('heart')} 又多了解老大一点</span><h2 id="editor-title">${record ? '把这件小事，记得更准确' : '记一件小事'}</h2></div><button type="button" class="icon-button close-button" data-action="close" aria-label="关闭编辑">${icon('close')}</button></header><div class="editor-fields"><input type="hidden" name="id" value="${esc(record?.id || '')}"><label class="field"><span>这次发现了什么 <span class="required">*</span></span><input name="title" maxlength="80" required placeholder="比如：下雨天喜欢窝着看电影" value="${esc(record?.title || '')}" autofocus></label><div class="form-row"><label class="field"><span>放在哪颗星球</span><select name="category">${categories.map(item => `<option value="${item.id}" ${category === item.id ? 'selected' : ''}>${item.emoji} ${item.name}</option>`).join('')}</select></label><div class="field sentiment-field"><span>老大的态度</span><select name="sentiment" aria-label="老大的态度">${Object.entries(sentiments).map(([value, label]) => `<option value="${value}" ${(record?.sentiment || (category === 'profile' ? 'profile' : category === 'habits' ? 'habit' : category === 'avoid' ? 'less' : 'love')) === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div><p id="category-suggestion" class="field-hint" ${editorCategoryTouched ? 'hidden' : ''}>输入标题后，会帮你建议一个分类。</p><label id="details-field" class="field" ${category === 'drinks' ? 'hidden' : ''}><span>记得更具体一点</span><textarea name="details" rows="3" maxlength="3000" placeholder="什么口味、什么场景，或者老大特别在意的细节…">${esc(record?.details || '')}</textarea></label><label id="order-field" class="field" ${category !== 'drinks' ? 'hidden' : ''}><span>老大的专属点单 <span class="optional">每行一项</span></span><textarea name="order" rows="5" maxlength="2600" placeholder="温度：热&#10;甜度：不另外加糖&#10;奶类：巴旦木奶">${esc(record?.order ? record.order.map(pair => pair.join('：')).join('\n') : category === 'drinks' ? record?.details || '' : '')}</textarea><span class="field-hint">例如「冰量：少冰」，保存后就能一键复制点单。</span></label><label class="field"><span>悄悄补充 <span class="optional">选填</span></span><textarea name="note" rows="2" maxlength="1000" placeholder="比如：不怎么吃鸡肉，但手撕鸡是例外。">${esc(record?.note || '')}</textarea></label><p id="form-error" class="form-error" role="alert" hidden></p></div><footer class="dialog-footer"><span>${icon('lock')} 保存到当前浏览器</span><button type="submit" class="button primary">${icon('heart')}${record ? '保存这份了解' : '好好记住'}</button></footer></form>`;
+  dialog.innerHTML = `<form id="record-form"><header class="dialog-header"><div><span class="form-eyebrow">${icon('heart')} 又多了解老大一点</span><h2 id="editor-title">${record ? '把这件小事，记得更准确' : '记一件小事'}</h2></div><button type="button" class="icon-button close-button" data-action="close" aria-label="关闭编辑">${icon('close')}</button></header><div class="editor-fields"><input type="hidden" name="id" value="${esc(record?.id || '')}"><label class="field"><span>这次发现了什么 <span class="required">*</span></span><input name="title" maxlength="80" required placeholder="比如：下雨天喜欢窝着看电影" value="${esc(record?.title || '')}" autofocus></label><div class="form-row"><label class="field"><span>放在哪颗星球</span><select name="category">${categories.map(item => `<option value="${item.id}" ${category === item.id ? 'selected' : ''}>${item.emoji} ${item.name}</option>`).join('')}</select></label><div class="field sentiment-field"><span>老大的态度</span><select name="sentiment" aria-label="老大的态度">${Object.entries(sentiments).map(([value, label]) => `<option value="${value}" ${(record?.sentiment || (category === 'profile' ? 'profile' : category === 'habits' ? 'habit' : category === 'avoid' ? 'less' : 'love')) === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div><p id="category-suggestion" class="field-hint" ${editorCategoryTouched ? 'hidden' : ''}>输入标题后，会帮你建议一个分类。</p><label id="details-field" class="field" ${category === 'drinks' ? 'hidden' : ''}><span>记得更具体一点</span><textarea name="details" rows="3" maxlength="3000" placeholder="什么口味、什么场景，或者老大特别在意的细节…">${esc(record?.details || '')}</textarea></label><label id="order-field" class="field" ${category !== 'drinks' ? 'hidden' : ''}><span>老大的专属点单 <span class="optional">每行一项</span></span><textarea name="order" rows="5" maxlength="2600" placeholder="温度：热&#10;甜度：不另外加糖&#10;奶类：巴旦木奶">${esc(record?.order ? record.order.map(pair => pair.join('：')).join('\n') : category === 'drinks' ? record?.details || '' : '')}</textarea><span class="field-hint">例如「冰量：少冰」，保存后就能一键复制点单。</span></label><label class="field"><span>悄悄补充 <span class="optional">选填</span></span><textarea name="note" rows="2" maxlength="1000" placeholder="比如：不怎么吃鸡肉，但手撕鸡是例外。">${esc(record?.note || '')}</textarea></label><p id="form-error" class="form-error" role="alert" hidden></p></div><footer class="dialog-footer"><span>${icon('lock')} 保存到云端</span><button type="submit" class="button primary">${icon('heart')}${record ? '保存这份了解' : '好好记住'}</button></footer></form>`;
   dialog.showModal();
   const form = dialog.querySelector('form');
   const titleInput = form.elements.title;
@@ -124,7 +234,7 @@ function updateEditorFields(form) {
   document.querySelector('#order-field').hidden = !drinks;
 }
 
-function saveForm(event) {
+async function saveForm(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
   const existing = state.records.find(record => record.id === data.get('id'));
@@ -146,17 +256,13 @@ function saveForm(event) {
   }
   const next = existing ? state.records.map(item => item.id === existing.id ? record : item) : [...state.records, record];
   if (next.length > 2000) { notify('当前记录已达 2000 条，请先导出整理。'); return; }
-  state.records = next;
-  const saved = persist();
+  const submit = event.currentTarget.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  const saved = await saveRecords(next);
+  submit.disabled = false;
+  if (!saved) return;
   closeDialogs();
-  renderContent();
-  notify(saved ? existing ? '这份了解，已经更新好了 ♡' : '又多了解老大一点，记住啦 ♡' : '记录暂存在页面中，请立刻导出备份', !saved ? { label: '导出', action: 'export' } : null);
-}
-
-function persist() {
-  state.saved = persistRecords(state.records);
-  document.querySelector('#save-label').textContent = state.saved ? '已保存在此浏览器' : '暂未保存 · 请导出备份';
-  return state.saved;
+  notify(existing ? '这份了解，已经保存到云端 ♡' : '又多了解老大一点，已经保存到云端 ♡');
 }
 
 function confirmDelete(id) {
@@ -167,15 +273,14 @@ function confirmDelete(id) {
   dialog.showModal();
 }
 
-function deleteRecord(id) {
+async function deleteRecord(id) {
   undoRecord = { record: state.records.find(item => item.id === id), index: state.records.findIndex(item => item.id === id) };
   if (!undoRecord.record) return;
-  state.records = state.records.filter(item => item.id !== id);
-  const saved = persist();
+  const saved = await saveRecords(state.records.filter(item => item.id !== id));
+  if (!saved) return;
   document.querySelector('#confirm-dialog').close();
   if (document.querySelector('#detail-dialog').open) showCategory(state.lastCategory);
-  renderContent();
-  notify(saved ? '已放下这件小事' : '已移除，但尚未保存，请导出备份', { label: '撤销', action: 'undo' }, 10000);
+  notify('已从云端移除这件小事', { label: '撤销', action: 'undo' }, 10000);
 }
 
 async function copyOrder(id, button) {
@@ -215,8 +320,19 @@ function exportBackup() {
 
 function showPrivacy() {
   const dialog = document.querySelector('#privacy-dialog');
-  dialog.innerHTML = `<div class="small-dialog-body"><button class="icon-button close-button" data-action="close" aria-label="关闭保存说明">${icon('close')}</button><span class="small-illustration">💌</span><h2 id="privacy-title">把小事，好好收着</h2><p>你新增和修改的记录会自动保存在<strong>当前设备、当前浏览器</strong>，刷新页面后依然在。</p><p>更换浏览器或清除网站数据后，记录不会自动同步。定期导出备份，在另一台设备导入，就能继续记录。</p><p class="privacy-note">导入会合并记录，同一件小事保留较新的版本，不会清空现有记录。</p></div><div class="dialog-footer"><button class="button subtle" data-action="import">${icon('upload')}导入备份</button><button class="button primary" data-action="export">${icon('download')}导出备份</button></div>`;
+  dialog.innerHTML = `<div class="small-dialog-body"><button class="icon-button close-button" data-action="close" aria-label="关闭保存说明">${icon('close')}</button><span class="small-illustration">💌</span><h2 id="privacy-title">把小事，好好收着</h2><p>记录保存在云端，刷新页面或换设备后会自动读取。只有输入管理密钥才能新增、编辑和删除；访客只能浏览。</p><p>浏览器里仍留有一份本地缓存。云端暂时无法连接时，可以查看缓存并导出备份，待恢复连接后再修改。</p><p class="privacy-note">导入备份会按记录 ID 合并，保留更新时间较新的版本。</p></div><div class="dialog-footer">${state.migrationRecords ? `<button class="button subtle" data-action="import-local">${icon('upload')}导入旧浏览器记录</button>` : ''}<button class="button subtle" data-action="retry-cloud">重新连接</button><button class="button subtle" data-action="import">${icon('upload')}导入备份</button><button class="button primary" data-action="export">${icon('download')}导出备份</button></div>`;
   dialog.showModal();
+}
+
+async function importLocalRecords() {
+  if (!state.migrationRecords) return;
+  const incoming = state.migrationRecords;
+  const merged = mergeBackup(state.records, incoming);
+  if (!await saveRecords(merged)) return;
+  state.migrationRecords = null;
+  finishLocalMigration();
+  renderContent();
+  notify('旧浏览器里的记录已经合并到云端 ♡');
 }
 
 function petKoala() {
@@ -294,25 +410,29 @@ document.addEventListener('click', event => {
   if (action === 'home') { event.preventDefault(); state.view = 'universe'; clearSearch(); }
   if (action === 'view') { state.view = button.dataset.view; clearSearch(); }
   if (action === 'category') showCategory(button.dataset.category);
-  if (action === 'new') showEditor(null, button.dataset.category);
-  if (action === 'edit') showEditor(state.records.find(record => record.id === button.dataset.id));
+  if (action === 'new') withAdmin(() => showEditor(null, button.dataset.category));
+  if (action === 'edit') withAdmin(() => showEditor(state.records.find(record => record.id === button.dataset.id)));
   if (action === 'close') button.closest('dialog')?.close();
   if (action === 'filter') { state.filter = button.dataset.filter; renderContent(); }
   if (action === 'clear-search') clearSearch();
   if (action === 'copy') copyOrder(button.dataset.id, button);
   if (action === 'pet') petKoala();
-  if (action === 'delete') confirmDelete(button.dataset.id);
-  if (action === 'confirm-delete') deleteRecord(button.dataset.id);
+  if (action === 'delete') withAdmin(() => confirmDelete(button.dataset.id));
+  if (action === 'confirm-delete') withAdmin(() => deleteRecord(button.dataset.id));
   if (action === 'export') exportBackup();
-  if (action === 'import') document.querySelector('#import-file').click();
+  if (action === 'import') withAdmin(() => document.querySelector('#import-file').click());
+  if (action === 'import-local') withAdmin(importLocalRecords);
+  if (action === 'retry-cloud') { closeDialogs(); connectCloud(); }
   if (action === 'privacy') showPrivacy();
-  if (action === 'undo' && undoRecord) {
-    state.records.splice(Math.min(undoRecord.index, state.records.length), 0, undoRecord.record);
+  if (action === 'admin') state.admin ? logoutAdmin() : showAdmin();
+  if (action === 'undo' && undoRecord) withAdmin(async () => {
+    const next = [...state.records];
+    next.splice(Math.min(undoRecord.index, next.length), 0, undoRecord.record);
+    if (!await saveRecords(next)) return;
     undoRecord = null;
-    const saved = persist(); renderContent();
     if (document.querySelector('#detail-dialog').open) showCategory(state.lastCategory);
-    notify(saved ? '已经找回这件小事啦 ♡' : '记录已找回，暂未保存，请导出备份');
-  }
+    notify('已经从云端找回这件小事啦 ♡');
+  });
 });
 
 function clearSearch() {
@@ -343,23 +463,17 @@ document.querySelector('#import-file').addEventListener('change', async event =>
   try {
     if (file.size > 2 * 1024 * 1024) throw new Error('文件有点大，请选择 2MB 以内的备份。');
     const incoming = readBackup(await file.text());
-    const before = JSON.stringify(state.records);
-    state.records = mergeBackup(state.records, incoming);
-    const changed = before !== JSON.stringify(state.records);
-    const saved = persist(); closeDialogs(); renderContent();
-    notify(saved ? changed ? `已合并 ${incoming.length} 条备份记录，原有小事也都在 ♡` : '备份里的小事已经都在这里啦 ♡' : '已导入，但浏览器保存失败，请保留备份文件');
+    const merged = mergeBackup(state.records, incoming);
+    if (await saveRecords(merged)) {
+      closeDialogs();
+      notify(`已把 ${incoming.length} 条备份记录合并到云端 ♡`);
+    }
   } catch (error) { notify(error instanceof SyntaxError ? '这个文件不是有效的 JSON 备份，请重新选择。' : error.message); }
   event.target.value = '';
 });
-window.addEventListener('storage', event => {
-  if (event.key !== 'koala-universe.records.v1' || !event.newValue) return;
-  try {
-    state.records = validateRecords(JSON.parse(event.newValue).records);
-    renderContent();
-    if (document.querySelector('#detail-dialog').open) showCategory(state.lastCategory);
-    notify('已同步这个浏览器另一窗口里的记录');
-  } catch { /* Ignore invalid writes from outside this app. */ }
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && !document.querySelector('dialog[open]')) connectCloud();
 });
 
 renderContent();
-if (loaded.warning) notify(loaded.warning, { label: '导出', action: 'export' }, 12000);
+connectCloud();
