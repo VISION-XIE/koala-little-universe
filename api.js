@@ -1,9 +1,9 @@
 const local = ['localhost', '127.0.0.1'].includes(location.hostname);
 export const apiOrigin = local ? 'http://127.0.0.1:8787' : 'https://koalasissy.cn';
 
-async function request(path, { method = 'GET', token = '', body } = {}) {
+async function request(path, { method = 'GET', token = '', body, timeoutMs = 10000 } = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${apiOrigin}${path}`, {
       method,
@@ -38,3 +38,5 @@ export const fetchCloudRecords = () => request('/api/records');
 export const checkAdmin = token => request('/api/admin/check', { method: 'POST', token });
 export const saveCloudRecords = (records, expectedRevision, token) =>
   request('/api/records', { method: 'PUT', token, body: { records, expectedRevision } });
+export const chatWithKoala = messages =>
+  request('/api/ai/chat', { method: 'POST', body: { messages }, timeoutMs: 55000 });

@@ -1,7 +1,7 @@
 import { categories, categoryById, initialRecords, sentiments, matchesQuery, suggestCategory } from './data.js?v=4';
 import { loadRecords, persistRecords, readBackup, mergeBackup, validateRecords, loadLocalMigrationCandidates, retainLocalMigration, finishLocalMigration } from './store.js?v=4';
 import { icon, escapeHtml as esc } from './icons.js';
-import { fetchCloudRecords, checkAdmin, saveCloudRecords } from './api.js?v=4';
+import { fetchCloudRecords, checkAdmin, saveCloudRecords, chatWithKoala } from './api.js?v=6';
 
 const loaded = loadRecords();
 let rememberedToken = '';
@@ -13,13 +13,14 @@ let editorCategoryTouched = false;
 let undoRecord = null;
 let hoverSource = null;
 let pendingAdminAction = null;
+const aiChat = { turns: [], busy: false };
 const count = id => state.records.filter(record => record.category === id).length;
 
 app.innerHTML = `
   <header class="site-header">
     <a class="brand" href="#" aria-label="Koala的小宇宙首页" data-action="home"><img src="./assets/koala.webp" alt="" width="50" height="50"><span>Koala<span class="brand-zh">的小宇宙</span></span><span class="brand-heart">♥</span></a>
     <nav class="main-nav" aria-label="主导航"><button class="nav-button active" data-action="view" data-view="universe">${icon('orbit')}<span>喜好星球</span></button><button class="nav-button" data-action="view" data-view="records">${icon('book')}<span>所有记录</span></button></nav>
-    <div class="header-actions"><label class="search-box">${icon('search')}<input id="search" type="search" placeholder="搜索老大的小喜好…" aria-label="搜索老大的小喜好" autocomplete="off"><kbd>/</kbd></label><button class="button primary add-button" data-action="new">${icon('plus')}<span>记一件小事</span></button></div>
+    <div class="header-actions"><button class="ai-trigger" data-action="ai-open" aria-haspopup="dialog"><span class="ai-trigger-star" aria-hidden="true">✦</span><span>问问 Koala AI</span><span class="ai-trigger-arrow" aria-hidden="true">↗</span></button><button class="button primary add-button" data-action="new">${icon('plus')}<span>记一件小事</span></button></div>
   </header>
   <main id="main"></main>
   <footer class="site-footer"><span class="footer-love">${icon('heart')}偏爱，藏在每个小细节里。</span><div class="footer-actions"><button class="save-state" data-action="privacy">${icon('lock')}<span id="save-label">正在连接云端…</span></button><button class="save-state" data-action="admin"><span id="admin-label">管理员登录</span></button></div></footer>
@@ -29,6 +30,7 @@ app.innerHTML = `
   <dialog id="confirm-dialog" class="small-dialog" aria-labelledby="confirm-title"></dialog>
   <dialog id="privacy-dialog" class="small-dialog" aria-labelledby="privacy-title"></dialog>
   <dialog id="admin-dialog" class="small-dialog" aria-labelledby="admin-title"></dialog>
+  <dialog id="ai-dialog" class="ai-dialog" aria-labelledby="ai-title"></dialog>
   <input id="import-file" type="file" accept="application/json,.json" hidden>
 `;
 
@@ -135,6 +137,83 @@ async function saveRecords(nextRecords) {
     notify(error.message || '云端保存失败，请稍后再试。', { label: '导出备份', action: 'export' }, 10000);
     return false;
   }
+}
+
+function openAi() {
+  const dialog = document.querySelector('#ai-dialog');
+  if (!dialog.querySelector('.ai-shell')) {
+    dialog.innerHTML = `<div class="ai-shell"><header class="ai-header"><div class="ai-avatar" aria-hidden="true"><img src="./assets/koala.webp" alt=""></div><div><span class="ai-eyebrow">你的小宇宙助手 ✦</span><h2 id="ai-title">Koala AI</h2><p>问喜好、聊习惯，也能帮你整理新的小事</p></div><button class="icon-button ai-close" data-action="close" aria-label="关闭 Koala AI">${icon('close')}</button></header><div id="ai-messages" class="ai-messages" role="log" aria-live="polite"></div><div id="ai-suggestions" class="ai-suggestions"></div><form id="ai-form" class="ai-form"><label class="sr-only" for="ai-input">和 Koala AI 说话</label><textarea id="ai-input" rows="2" maxlength="800" placeholder="问问老大喜欢什么，或说：记住老大最近喜欢…"></textarea><button class="ai-send" type="submit" aria-label="发送消息">↗</button></form><p class="ai-footnote">AI 会参考已保存的记录；新记录需确认并登录管理模式。</p></div>`;
+    dialog.querySelector('#ai-form').addEventListener('submit', sendAiMessage);
+    dialog.querySelector('#ai-input').addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        dialog.querySelector('#ai-form').requestSubmit();
+      }
+    });
+  }
+  renderAiChat();
+  if (!dialog.open) dialog.showModal();
+  dialog.querySelector('#ai-input').focus();
+}
+
+function renderAiChat() {
+  const dialog = document.querySelector('#ai-dialog');
+  if (!dialog.querySelector('.ai-shell')) return;
+  const log = dialog.querySelector('#ai-messages');
+  const suggestions = dialog.querySelector('#ai-suggestions');
+  log.innerHTML = aiChat.turns.length ? aiChat.turns.map((turn, index) => {
+    const isUser = turn.role === 'user';
+    const sources = !isUser && turn.sources?.length ? `<div class="ai-sources">${turn.sources.map(id => {
+      const record = state.records.find(item => item.id === id);
+      return record ? `<button data-action="ai-source" data-id="${esc(id)}">查看「${esc(record.title)}」↗</button>` : '';
+    }).join('')}</div>` : '';
+    const drafts = !isUser && turn.drafts?.length ? `<div class="ai-drafts"><strong>准备记下 ${turn.drafts.length} 件小事</strong>${turn.drafts.map(draft => `<div class="ai-draft"><span>${categoryById(draft.category)?.emoji || '💌'} ${esc(draft.title)}</span><p>${esc(draft.details || draft.note || '一件新发现')}</p></div>`).join('')}${turn.saved ? '<p class="ai-saved">✓ 已保存到云端</p>' : `<button class="button primary ai-save" data-action="ai-save" data-index="${index}">确认并保存${turn.drafts.length > 1 ? `这 ${turn.drafts.length} 条` : ''}</button>`}</div>` : '';
+    return `<div class="ai-turn ${isUser ? 'ai-user' : 'ai-assistant'}"><span class="ai-speaker">${isUser ? '你' : 'Koala AI'}</span><p>${esc(turn.content)}</p>${sources}${drafts}</div>`;
+  }).join('') : `<div class="ai-welcome"><span>✦</span><h3>嗨，我是 Koala AI</h3><p>老大的偏爱、小习惯和小档案，我会陪你慢慢记住。</p></div>`;
+  if (aiChat.busy) log.insertAdjacentHTML('beforeend', '<div class="ai-turn ai-assistant ai-thinking"><span class="ai-speaker">Koala AI</span><p>正在翻看小宇宙… <span aria-hidden="true">✦</span></p></div>');
+  suggestions.innerHTML = aiChat.turns.length ? '' : `<button data-action="ai-prompt" data-prompt="老大喜欢喝什么？">老大喜欢喝什么？</button><button data-action="ai-prompt" data-prompt="老大不太喜欢吃什么？">有哪些饮食避雷？</button><button data-action="ai-prompt" data-prompt="老大的小档案有哪些？">看看小档案</button>`;
+  dialog.querySelector('#ai-input').disabled = aiChat.busy;
+  dialog.querySelector('.ai-send').disabled = aiChat.busy;
+  log.scrollTop = log.scrollHeight;
+}
+
+async function sendAiMessage(event) {
+  event.preventDefault();
+  if (aiChat.busy) return;
+  const input = document.querySelector('#ai-input');
+  const content = input.value.trim();
+  if (!content) return;
+  input.value = '';
+  aiChat.turns.push({ role: 'user', content });
+  aiChat.busy = true;
+  renderAiChat();
+  try {
+    const messages = aiChat.turns.filter(turn => turn.role === 'user' || turn.role === 'assistant')
+      .slice(-12).map(turn => ({ role: turn.role, content: turn.content }));
+    const answer = await chatWithKoala(messages);
+    aiChat.turns.push({ role: 'assistant', content: answer.reply, sources: answer.sources || [], drafts: answer.drafts || [], saved: false });
+  } catch (error) {
+    aiChat.turns.push({ role: 'notice', content: error.message || 'Koala AI 暂时走神了，请稍后再试。' });
+  } finally {
+    aiChat.busy = false;
+    renderAiChat();
+    input.focus();
+  }
+}
+
+async function saveAiDrafts(index) {
+  const turn = aiChat.turns[index];
+  if (!turn?.drafts?.length || turn.saved) return;
+  const duplicates = turn.drafts.filter(draft => state.records.some(record => record.category === draft.category && record.title.trim() === draft.title.trim()));
+  if (duplicates.length) { notify('发现同名记录，请先查看已有内容，再决定是否手动编辑。'); return; }
+  const now = new Date().toISOString();
+  const additions = turn.drafts.map(draft => ({ ...draft, id: crypto.randomUUID(), createdAt: now, updatedAt: now }));
+  try { validateRecords(additions); }
+  catch { notify('这几条草稿需要再整理一下，请手动记录。'); return; }
+  if (!await saveRecords([...state.records, ...additions])) return;
+  turn.saved = true;
+  renderAiChat();
+  notify(`${additions.length} 件小事已保存到云端 ♡`);
 }
 
 function categorySummary(category) {
@@ -462,6 +541,13 @@ document.addEventListener('click', event => {
   const action = button.dataset.action;
   if (action === 'home') { event.preventDefault(); state.view = 'universe'; clearSearch(); }
   if (action === 'view') { state.view = button.dataset.view; clearSearch(); }
+  if (action === 'ai-open') openAi();
+  if (action === 'ai-prompt') { document.querySelector('#ai-input').value = button.dataset.prompt; document.querySelector('#ai-form').requestSubmit(); }
+  if (action === 'ai-save') withAdmin(() => saveAiDrafts(Number(button.dataset.index)));
+  if (action === 'ai-source') {
+    const record = state.records.find(item => item.id === button.dataset.id);
+    if (record) { document.querySelector('#ai-dialog').close(); showCategory(record.category, record.id); }
+  }
   if (action === 'category') showCategory(button.dataset.category);
   if (action === 'profile-record') showCategory('profile', button.dataset.id);
   if (action === 'new') withAdmin(() => showEditor(null, button.dataset.category));
@@ -491,18 +577,16 @@ document.addEventListener('click', event => {
 
 function clearSearch() {
   state.query = ''; state.filter = 'all';
-  document.querySelector('#search').value = '';
   renderContent();
 }
 
-document.querySelector('#search').addEventListener('input', event => { state.query = event.target.value; renderContent(); });
 document.querySelector('#hover-preview').addEventListener('pointerenter', () => clearTimeout(hoverTimer));
 document.querySelector('#hover-preview').addEventListener('pointerleave', hidePreview);
 window.addEventListener('scroll', hidePreview, { passive: true });
 window.addEventListener('resize', hidePreview);
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') hidePreview();
-  if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) && !document.querySelector('dialog[open]')) { event.preventDefault(); document.querySelector('#search').focus(); }
+  if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) && !document.querySelector('dialog[open]')) { event.preventDefault(); openAi(); }
 });
 document.querySelectorAll('dialog').forEach(dialog => {
   dialog.addEventListener('click', event => {
