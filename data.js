@@ -11,7 +11,7 @@ export const categories = [
 
 const seed = (id, category, title, details, extras = {}) => ({ id, category, title, details, sentiment: 'love', note: '', createdAt: null, updatedAt: null, ...extras });
 export const initialRecords = [
-  seed('flat-white', 'drinks', '星巴克 · 馥芮白', '热 / 不另外加糖 / 去奶泡 / 浓缩份数 3 / 默认原味 / 巴旦木奶', { order: [['温度', '热'], ['甜度', '不另外加糖'], ['奶泡', '去奶泡'], ['浓缩', '3 份'], ['风味', '默认原味'], ['奶类', '巴旦木奶']], note: '每一个小细节，都照着老大喜欢的来。' }),
+  seed('flat-white', 'drinks', '星巴克 · 馥芮白', '热 / 不另外加糖 / 去奶泡 / 浓缩份数 3 / 默认原味 / 巴旦木奶', { order: [['温度', '热'], ['甜度', '不另外加糖'], ['奶泡', '去奶泡'], ['浓缩', '3 份'], ['风味', '默认原味'], ['奶类', '巴旦木奶']], note: '每一个小细节，都照着Koala喜欢的来。' }),
   seed('salt-tea', 'drinks', '1点点 · 藏青盐咸奶绿', '不另外加糖 / 少冰 / 改四季春茶 / 改 A2 牛乳', { order: [['甜度', '不另外加糖'], ['冰量', '少冰'], ['茶底', '改四季春茶'], ['奶类', '改 A2 牛乳']] }),
   seed('taro', 'snacks', '琦王香芋片', '喜欢吃琦王香芋片。'),
   seed('peanuts', 'snacks', '酒鬼五香花生', '喜欢吃酒鬼五香花生。'),

@@ -1,6 +1,8 @@
-import { categories, categoryById, initialRecords, sentiments, matchesQuery, suggestCategory } from './data.js?v=4';
+import { categories, categoryById, initialRecords, sentiments, matchesQuery, suggestCategory } from './data.js?v=7';
 import { loadRecords, persistRecords, readBackup, mergeBackup, validateRecords, loadLocalMigrationCandidates, retainLocalMigration, finishLocalMigration } from './store.js?v=4';
 import { icon, escapeHtml as esc } from './icons.js';
+import { createMemoryExperience } from './memory.js?v=7';
+const koalaName = value => String(value ?? '').replaceAll('老大', 'Koala');
 import { fetchCloudRecords, checkAdmin, saveCloudRecords, chatWithKoala } from './api.js?v=6';
 
 const loaded = loadRecords();
@@ -18,14 +20,13 @@ const count = id => state.records.filter(record => record.category === id).lengt
 
 app.innerHTML = `
   <header class="site-header">
-    <a class="brand" href="#" aria-label="Koala的小宇宙首页" data-action="home"><img src="./assets/koala.webp" alt="" width="50" height="50"><span>Koala<span class="brand-zh">的小宇宙</span></span><span class="brand-heart">♥</span></a>
+    <a class="brand" href="#" aria-label="Koala 的小宇宙首页" data-action="home"><img src="./assets/koala.webp" alt="" width="50" height="50"><span>Koala<span class="brand-zh">的小宇宙</span></span><span class="brand-heart">♥</span></a>
     <nav class="main-nav" aria-label="主导航"><button class="nav-button active" data-action="view" data-view="universe">${icon('orbit')}<span>喜好星球</span></button><button class="nav-button" data-action="view" data-view="records">${icon('book')}<span>所有记录</span></button></nav>
     <div class="header-actions"><button class="ai-trigger" data-action="ai-open" aria-haspopup="dialog"><span class="ai-trigger-star" aria-hidden="true">✦</span><span>问问 Koala AI</span><span class="ai-trigger-arrow" aria-hidden="true">↗</span></button><button class="button primary add-button" data-action="new">${icon('plus')}<span>记一件小事</span></button></div>
   </header>
   <main id="main"></main>
   <footer class="site-footer"><span class="footer-love">${icon('heart')}偏爱，藏在每个小细节里。</span><div class="footer-actions"><button class="save-state" data-action="privacy">${icon('lock')}<span id="save-label">正在连接云端…</span></button><button class="save-state" data-action="admin"><span id="admin-label">管理员登录</span></button></div></footer>
   <div id="hover-preview" class="hover-preview" role="tooltip" hidden></div>
-  <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title"></dialog>
   <dialog id="editor-dialog" class="editor-dialog" aria-labelledby="editor-title"></dialog>
   <dialog id="confirm-dialog" class="small-dialog" aria-labelledby="confirm-title"></dialog>
   <dialog id="privacy-dialog" class="small-dialog" aria-labelledby="privacy-title"></dialog>
@@ -33,6 +34,8 @@ app.innerHTML = `
   <dialog id="ai-dialog" class="ai-dialog" aria-labelledby="ai-title"></dialog>
   <input id="import-file" type="file" accept="application/json,.json" hidden>
 `;
+
+const memoryExperience = createMemoryExperience({ getRecords: () => state.records });
 
 function updateCloudLabel() {
   document.querySelector('#save-label').textContent = state.cloudStatus;
@@ -142,7 +145,7 @@ async function saveRecords(nextRecords) {
 function openAi() {
   const dialog = document.querySelector('#ai-dialog');
   if (!dialog.querySelector('.ai-shell')) {
-    dialog.innerHTML = `<div class="ai-shell"><header class="ai-header"><div class="ai-avatar" aria-hidden="true"><img src="./assets/koala.webp" alt=""></div><div><span class="ai-eyebrow">你的小宇宙助手 ✦</span><h2 id="ai-title">Koala AI</h2><p>问喜好、聊习惯，也能帮你整理新的小事</p></div><button class="icon-button ai-close" data-action="close" aria-label="关闭 Koala AI">${icon('close')}</button></header><div id="ai-messages" class="ai-messages" role="log" aria-live="polite"></div><div id="ai-suggestions" class="ai-suggestions"></div><form id="ai-form" class="ai-form"><label class="sr-only" for="ai-input">和 Koala AI 说话</label><textarea id="ai-input" rows="2" maxlength="800" placeholder="问问老大喜欢什么，或说：记住老大最近喜欢…"></textarea><button class="ai-send" type="submit" aria-label="发送消息">↗</button></form><p class="ai-footnote">AI 会参考已保存的记录；新记录需确认并登录管理模式。</p></div>`;
+    dialog.innerHTML = `<div class="ai-shell"><header class="ai-header"><div class="ai-avatar" aria-hidden="true"><img src="./assets/koala.webp" alt=""></div><div><span class="ai-eyebrow">你的小宇宙助手 ✦</span><h2 id="ai-title">Koala AI</h2><p>问喜好、聊习惯，也能帮你整理新的小事</p></div><button class="icon-button ai-close" data-action="close" aria-label="关闭 Koala AI">${icon('close')}</button></header><div id="ai-messages" class="ai-messages" role="log" aria-live="polite"></div><div id="ai-suggestions" class="ai-suggestions"></div><form id="ai-form" class="ai-form"><label class="sr-only" for="ai-input">和 Koala AI 说话</label><textarea id="ai-input" rows="2" maxlength="800" placeholder="问问 Koala 喜欢什么，或说：记住 Koala最近喜欢…"></textarea><button class="ai-send" type="submit" aria-label="发送消息">↗</button></form><p class="ai-footnote">AI 会参考已保存的记录；新记录需确认并登录管理模式。</p></div>`;
     dialog.querySelector('#ai-form').addEventListener('submit', sendAiMessage);
     dialog.querySelector('#ai-input').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -165,13 +168,13 @@ function renderAiChat() {
     const isUser = turn.role === 'user';
     const sources = !isUser && turn.sources?.length ? `<div class="ai-sources">${turn.sources.map(id => {
       const record = state.records.find(item => item.id === id);
-      return record ? `<button data-action="ai-source" data-id="${esc(id)}">查看「${esc(record.title)}」↗</button>` : '';
+      return record ? `<button data-action="ai-source" data-id="${esc(id)}">查看「${esc(koalaName(record.title))}」↗</button>` : '';
     }).join('')}</div>` : '';
     const drafts = !isUser && turn.drafts?.length ? `<div class="ai-drafts"><strong>准备记下 ${turn.drafts.length} 件小事</strong>${turn.drafts.map(draft => `<div class="ai-draft"><span>${categoryById(draft.category)?.emoji || '💌'} ${esc(draft.title)}</span><p>${esc(draft.details || draft.note || '一件新发现')}</p></div>`).join('')}${turn.saved ? '<p class="ai-saved">✓ 已保存到云端</p>' : `<button class="button primary ai-save" data-action="ai-save" data-index="${index}">确认并保存${turn.drafts.length > 1 ? `这 ${turn.drafts.length} 条` : ''}</button>`}</div>` : '';
     return `<div class="ai-turn ${isUser ? 'ai-user' : 'ai-assistant'}"><span class="ai-speaker">${isUser ? '你' : 'Koala AI'}</span><p>${esc(turn.content)}</p>${sources}${drafts}</div>`;
-  }).join('') : `<div class="ai-welcome"><span>✦</span><h3>嗨，我是 Koala AI</h3><p>老大的偏爱、小习惯和小档案，我会陪你慢慢记住。</p></div>`;
+  }).join('') : `<div class="ai-welcome"><span>✦</span><h3>嗨，我是 Koala AI</h3><p>Koala 的偏爱、小习惯和小档案，我会陪你慢慢记住。</p></div>`;
   if (aiChat.busy) log.insertAdjacentHTML('beforeend', '<div class="ai-turn ai-assistant ai-thinking"><span class="ai-speaker">Koala AI</span><p>正在翻看小宇宙… <span aria-hidden="true">✦</span></p></div>');
-  suggestions.innerHTML = aiChat.turns.length ? '' : `<button data-action="ai-prompt" data-prompt="老大喜欢喝什么？">老大喜欢喝什么？</button><button data-action="ai-prompt" data-prompt="老大不太喜欢吃什么？">有哪些饮食避雷？</button><button data-action="ai-prompt" data-prompt="老大的小档案有哪些？">看看小档案</button>`;
+  suggestions.innerHTML = aiChat.turns.length ? '' : `<button data-action="ai-prompt" data-prompt="Koala 喜欢喝什么？">Koala 喜欢喝什么？</button><button data-action="ai-prompt" data-prompt="Koala不太喜欢吃什么？">有哪些饮食避雷？</button><button data-action="ai-prompt" data-prompt="Koala 的小档案有哪些？">看看小档案</button>`;
   dialog.querySelector('#ai-input').disabled = aiChat.busy;
   dialog.querySelector('.ai-send').disabled = aiChat.busy;
   log.scrollTop = log.scrollHeight;
@@ -191,7 +194,7 @@ async function sendAiMessage(event) {
     const messages = aiChat.turns.filter(turn => turn.role === 'user' || turn.role === 'assistant')
       .slice(-12).map(turn => ({ role: turn.role, content: turn.content }));
     const answer = await chatWithKoala(messages);
-    aiChat.turns.push({ role: 'assistant', content: answer.reply, sources: answer.sources || [], drafts: answer.drafts || [], saved: false });
+    aiChat.turns.push({ role: 'assistant', content: koalaName(answer.reply), sources: answer.sources || [], drafts: (answer.drafts || []).map(draft => ({ ...draft, title: koalaName(draft.title), details: koalaName(draft.details), note: koalaName(draft.note) })), saved: false });
   } catch (error) {
     aiChat.turns.push({ role: 'notice', content: error.message || 'Koala AI 暂时走神了，请稍后再试。' });
   } finally {
@@ -236,6 +239,7 @@ function renderContent() {
   });
   document.querySelector('#main').innerHTML = isRecords ? recordsView() : universeView();
   if (!isRecords) bindOrbit();
+  memoryExperience.refresh();
 }
 
 function profileOrbit() {
@@ -248,56 +252,49 @@ function profileOrbit() {
   const shown = ordered.slice(0, ordered.length > 6 ? 5 : 6);
   const remaining = ordered.length - shown.length;
   return `<div class="profile-orbit" role="group" aria-label="关于 Koala 的小档案">
-    ${shown.map((record, index) => `<button class="profile-orbit-badge profile-orbit-slot-${index}" data-action="profile-record" data-id="${esc(record.id)}" aria-label="查看小档案：${esc(record.title)}" aria-haspopup="dialog"><span class="profile-orbit-spark" aria-hidden="true">✦</span><span class="profile-orbit-label">${esc(record.title)}</span></button>`).join('')}
+    ${shown.map((record, index) => `<button class="profile-orbit-badge profile-orbit-slot-${index}" data-action="profile-record" data-id="${esc(record.id)}" aria-label="查看小档案：${esc(koalaName(record.title))}" aria-haspopup="dialog"><span class="profile-orbit-spark" aria-hidden="true">✦</span><span class="profile-orbit-label">${esc(koalaName(record.title))}</span></button>`).join('')}
     ${remaining ? `<button class="profile-orbit-badge profile-orbit-slot-5 profile-orbit-more" data-action="category" data-category="profile" aria-label="查看其余 ${remaining} 条小档案" aria-haspopup="dialog"><span aria-hidden="true">✦</span><span>还有 ${remaining} 条</span></button>` : ''}
   </div>`;
 }
 
 function universeView() {
   const habitCount = count('habits');
-  return `<section class="page-intro"><div><h1>把老大的小喜好，放在心上<span class="title-period">。</span><span class="heading-heart" aria-hidden="true">♥</span></h1><p>每一件小事，都值得被好好记住。</p></div></section>
+  return `<section class="page-intro"><div><h1>把 Koala 的小喜好，放在心上<span class="title-period">。</span><span class="heading-heart" aria-hidden="true">♥</span></h1><p>每一件小事，都值得被好好记住。</p></div></section>
     <section class="universe" aria-label="Koala 的喜好星球">
       <div class="orbit-line orbit-one" aria-hidden="true"></div><div class="orbit-line orbit-two" aria-hidden="true"></div><div class="orbit-line orbit-three" aria-hidden="true"></div>
       <span class="spark spark-one" aria-hidden="true">✦</span><span class="spark spark-two" aria-hidden="true">✧</span><span class="spark spark-three" aria-hidden="true">♥</span><span class="spark spark-four" aria-hidden="true">✦</span>
       <div class="koala-center"><div id="koala-speech" class="speech" aria-live="polite">今天也要好好吃饭呀！<span>♡</span></div><button class="mascot" data-action="pet" aria-label="摸摸 Koala 的头，发现一个小喜好"><img src="./assets/koala.webp" alt="拿着刀叉、戴着厨师帽的可爱考拉 Koala" width="340" height="340" draggable="false"><span id="pet-hearts" aria-hidden="true"></span></button>${profileOrbit()}<div class="koala-name">Koala<span>♥</span></div><p class="pet-hint">点击摸摸头 <span aria-hidden="true">✧</span></p></div>
-      ${categories.slice(0, 6).map((category, index) => `<button class="planet-card ${category.color} position-${index}" data-action="category" data-category="${category.id}" aria-label="${category.name}，${count(category.id)} 条记录，点击查看详情" aria-haspopup="dialog"><div class="planet-heading"><span class="category-emoji" aria-hidden="true">${category.emoji}</span><h2>${category.name}</h2><span class="card-count">${count(category.id)}条 ${icon('chevron')}</span></div><div class="planet-summary">${categorySummary(category).map(line => `<p>${esc(line)}</p>`).join('')}</div><span class="card-open">点开看看 ${icon('chevron')}</span></button>`).join('')}
+      ${categories.slice(0, 6).map((category, index) => `<button class="planet-card ${category.color} position-${index}" data-action="category" data-category="${category.id}" aria-label="${category.name}，${count(category.id)} 条记录，点击查看详情" aria-haspopup="dialog"><div class="planet-heading"><span class="category-emoji" aria-hidden="true">${category.emoji}</span><h2>${category.name}</h2><span class="card-count">${count(category.id)}条 ${icon('chevron')}</span></div><div class="planet-summary">${categorySummary(category).map(line => `<p>${esc(koalaName(line))}</p>`).join('')}</div><span class="card-open">点开看看 ${icon('chevron')}</span></button>`).join('')}
       <button class="habit-button" data-action="${habitCount ? 'category' : 'new'}" data-category="habits">${icon(habitCount ? 'book' : 'plus')}<span>${habitCount ? `生活小习惯 · ${habitCount} 件小事` : '发现一个新习惯'}</span></button>
-      <p class="canvas-hint"><span class="desktop-hint">悬停探索喜好，点击收藏细节</span><span class="mobile-hint">点开小星球，看看老大的偏爱</span></p>
+      <p class="canvas-hint"><span class="desktop-hint">悬停探索喜好，点击收藏细节</span><span class="mobile-hint">点开小星球，看看Koala 的偏爱</span></p>
     </section>`;
 }
 
 function recordsView() {
   const results = state.records.filter(record => (state.filter === 'all' || record.category === state.filter) && matchesQuery(record, state.query));
   const searching = Boolean(state.query.trim());
-  return `<section class="page-intro records-intro"><div><h1>${searching ? '找找老大的小喜好' : '关于老大，都记在这里'}<span class="heading-heart" aria-hidden="true">♥</span></h1><p>${searching ? `找到 ${results.length} 条与「${esc(state.query)}」有关的记录` : `${state.records.length} 件被认真记住的小事，和慢慢了解老大的日常。`}</p></div><div class="backup-actions"><button class="button subtle" data-action="export">${icon('download')}导出备份</button><button class="button subtle" data-action="import">${icon('upload')}导入备份</button>${state.migrationRecords ? `<button class="button subtle" data-action="import-local">${icon('upload')}导入旧浏览器记录</button>` : ''}</div></section>
+  return `<section class="page-intro records-intro"><div><h1>${searching ? '找找 Koala 的小喜好' : '关于 Koala，都记在这里'}<span class="heading-heart" aria-hidden="true">♥</span></h1><p>${searching ? `找到 ${results.length} 条与「${esc(state.query)}」有关的记录` : `${state.records.length} 件被认真记住的小事，和慢慢了解 Koala 的日常。`}</p></div><div class="backup-actions"><button class="button subtle" data-action="export">${icon('download')}导出备份</button><button class="button subtle" data-action="import">${icon('upload')}导入备份</button>${state.migrationRecords ? `<button class="button subtle" data-action="import-local">${icon('upload')}导入旧浏览器记录</button>` : ''}</div></section>
     <div class="filters" aria-label="记录分类"><button class="filter ${state.filter === 'all' ? 'selected' : ''}" data-action="filter" data-filter="all" aria-pressed="${state.filter === 'all'}">全部 <span>${state.records.length}</span></button>${categories.map(category => `<button class="filter ${state.filter === category.id ? 'selected' : ''}" data-action="filter" data-filter="${category.id}" aria-pressed="${state.filter === category.id}">${category.emoji} ${category.name} <span>${count(category.id)}</span></button>`).join('')}</div>
-    <section class="records-grid" aria-label="喜好记录" aria-live="polite">${results.length ? results.map(record => recordCard(record)).join('') : `<div class="empty-state"><span aria-hidden="true">${searching ? '🔎' : '🌱'}</span><h2>${searching ? '这件小事，还没找到' : '这里等着一个新发现'}</h2><p>${searching ? '换个关键词，或者把这个新发现记下来。' : '老大的小习惯、喜欢的事，都可以从这里开始。'}</p><button class="button primary" data-action="${searching ? 'clear-search' : 'new'}" ${!searching && state.filter !== 'all' ? `data-category="${state.filter}"` : ''}>${icon(searching ? 'search' : 'plus')}${searching ? '清除搜索与筛选' : '记一件小事'}</button></div>`}</section>`;
+    <section class="records-grid" aria-label="喜好记录" aria-live="polite">${results.length ? results.map(record => recordCard(record)).join('') : `<div class="empty-state"><span aria-hidden="true">${searching ? '🔎' : '🌱'}</span><h2>${searching ? '这件小事，还没找到' : '这里等着一个新发现'}</h2><p>${searching ? '换个关键词，或者把这个新发现记下来。' : 'Koala 的小习惯、喜欢的事，都可以从这里开始。'}</p><button class="button primary" data-action="${searching ? 'clear-search' : 'new'}" ${!searching && state.filter !== 'all' ? `data-category="${state.filter}"` : ''}>${icon(searching ? 'search' : 'plus')}${searching ? '清除搜索与筛选' : '记一件小事'}</button></div>`}</section>`;
 }
 
 function recordCard(record, detailed = false) {
+  record = { ...record, title: koalaName(record.title), details: koalaName(record.details), note: koalaName(record.note) };
   const category = categoryById(record.category);
-  return `<article class="record-card ${category.color} ${record.order?.length ? 'order-card' : ''}" data-record-id="${esc(record.id)}"><div class="record-top"><span class="record-category">${category.emoji} ${category.name}</span><span class="sentiment ${record.sentiment}">${record.sentiment === 'love' ? '♡ ' : ''}${sentiments[record.sentiment]}</span></div><h3>${esc(record.title)}</h3>${record.order?.length ? `<dl class="order-details">${record.order.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>` : `<p class="record-description">${esc(record.details || '还没有写下具体细节。')}</p>`}${record.note ? `<p class="record-note">${icon('heart')}<span>${esc(record.note)}</span></p>` : ''}<div class="record-bottom"><span class="record-date">${record.updatedAt ? `记于 ${new Date(record.updatedAt).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}` : '用心记住的小事'}</span><div class="record-actions">${record.category === 'drinks' ? `<button class="copy-button" data-action="copy" data-id="${esc(record.id)}" aria-label="复制${esc(record.title)}点单">${icon('copy')}<span>复制点单</span></button>` : ''}<button class="icon-button" data-action="edit" data-id="${esc(record.id)}" aria-label="编辑${esc(record.title)}">${icon('edit')}</button><button class="icon-button danger-hover" data-action="delete" data-id="${esc(record.id)}" aria-label="删除${esc(record.title)}">${icon('trash')}</button></div></div></article>`;
+  return `<article class="record-card ${category.color} ${record.order?.length ? 'order-card' : ''}" data-record-id="${esc(record.id)}" data-action="record" data-id="${esc(record.id)}"><div class="record-top"><span class="record-category">${category.emoji} ${category.name}</span><span class="sentiment ${record.sentiment}">${record.sentiment === 'love' ? '♡ ' : ''}${sentiments[record.sentiment]}</span></div><h3><button class="record-title-button" data-action="record" data-id="${esc(record.id)}" aria-haspopup="dialog">${esc(koalaName(record.title))}<span aria-hidden="true">↗</span></button></h3>${record.order?.length ? `<dl class="order-details">${record.order.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>` : `<p class="record-description">${esc(record.details || '还没有写下具体细节。')}</p>`}${record.note ? `<p class="record-note">${icon('heart')}<span>${esc(koalaName(record.note))}</span></p>` : ''}<div class="record-bottom"><span class="record-date">${record.updatedAt ? `记于 ${new Date(record.updatedAt).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}` : '用心记住的小事'}</span><div class="record-actions">${record.category === 'drinks' ? `<button class="copy-button" data-action="copy" data-id="${esc(record.id)}" aria-label="复制${esc(koalaName(record.title))}点单">${icon('copy')}<span>复制点单</span></button>` : ''}<button class="icon-button" data-action="edit" data-id="${esc(record.id)}" aria-label="编辑${esc(koalaName(record.title))}">${icon('edit')}</button><button class="icon-button danger-hover" data-action="delete" data-id="${esc(record.id)}" aria-label="删除${esc(koalaName(record.title))}">${icon('trash')}</button></div></div></article>`;
 }
 
-function showCategory(id, focusRecordId = '') {
+function showCategory(id, focusRecordId = '', source = null) {
   hidePreview();
-  const category = categoryById(id);
-  if (!category) return;
+  if (!categoryById(id)) return;
   state.lastCategory = id;
-  const records = state.records.filter(record => record.category === id);
-  const dialog = document.querySelector('#detail-dialog');
-  dialog.innerHTML = `<header class="dialog-header ${category.color}"><div><span class="dialog-category-emoji" aria-hidden="true">${category.emoji}</span><h2 id="detail-title">${category.name}</h2><p>${category.id === 'profile' ? '关于老大的了解，都好好记在这里。' : `${records.length} 件小事，都是老大独一份的偏爱。`}</p></div><button class="icon-button close-button" data-action="close" aria-label="关闭详情">${icon('close')}</button></header><div class="detail-content">${records.length ? records.map(record => recordCard(record, true)).join('') : `<div class="empty-state"><span>🌱</span><h3>等你记下第一个小发现</h3></div>`}</div><div class="dialog-footer"><span>慢慢了解，好好记得。</span><button class="button primary" data-action="new" data-category="${id}">${icon('plus')}再记一件</button></div>`;
-  if (!dialog.open) dialog.showModal();
-  if (focusRecordId) requestAnimationFrame(() => {
-    const target = [...dialog.querySelectorAll('[data-record-id]')].find(card => card.dataset.recordId === focusRecordId);
-    if (!target) return;
-    target.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-    target.classList.add('record-highlight');
-    setTimeout(() => target.classList.remove('record-highlight'), 1800);
-  });
+  memoryExperience.show(id, focusRecordId, source);
 }
 
-function closeDialogs() { document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); }
+function closeDialogs() {
+  memoryExperience.close(true);
+  document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+}
 
 function showEditor(record = null, categoryId = '') {
   hidePreview();
@@ -305,7 +302,7 @@ function showEditor(record = null, categoryId = '') {
   editorCategoryTouched = Boolean(record || categoryId);
   const category = record?.category || categoryId || 'habits';
   const dialog = document.querySelector('#editor-dialog');
-  dialog.innerHTML = `<form id="record-form"><header class="dialog-header"><div><span class="form-eyebrow">${icon('heart')} 又多了解老大一点</span><h2 id="editor-title">${record ? '把这件小事，记得更准确' : '记一件小事'}</h2></div><button type="button" class="icon-button close-button" data-action="close" aria-label="关闭编辑">${icon('close')}</button></header><div class="editor-fields"><input type="hidden" name="id" value="${esc(record?.id || '')}"><label class="field"><span>这次发现了什么 <span class="required">*</span></span><input name="title" maxlength="80" required placeholder="比如：下雨天喜欢窝着看电影" value="${esc(record?.title || '')}" autofocus></label><div class="form-row"><label class="field"><span>放在哪颗星球</span><select name="category">${categories.map(item => `<option value="${item.id}" ${category === item.id ? 'selected' : ''}>${item.emoji} ${item.name}</option>`).join('')}</select></label><div class="field sentiment-field"><span>老大的态度</span><select name="sentiment" aria-label="老大的态度">${Object.entries(sentiments).map(([value, label]) => `<option value="${value}" ${(record?.sentiment || (category === 'profile' ? 'profile' : category === 'habits' ? 'habit' : category === 'avoid' ? 'less' : 'love')) === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div><p id="category-suggestion" class="field-hint" ${editorCategoryTouched ? 'hidden' : ''}>输入标题后，会帮你建议一个分类。</p><label id="details-field" class="field" ${category === 'drinks' ? 'hidden' : ''}><span>记得更具体一点</span><textarea name="details" rows="3" maxlength="3000" placeholder="什么口味、什么场景，或者老大特别在意的细节…">${esc(record?.details || '')}</textarea></label><label id="order-field" class="field" ${category !== 'drinks' ? 'hidden' : ''}><span>老大的专属点单 <span class="optional">每行一项</span></span><textarea name="order" rows="5" maxlength="2600" placeholder="温度：热&#10;甜度：不另外加糖&#10;奶类：巴旦木奶">${esc(record?.order ? record.order.map(pair => pair.join('：')).join('\n') : category === 'drinks' ? record?.details || '' : '')}</textarea><span class="field-hint">例如「冰量：少冰」，保存后就能一键复制点单。</span></label><label class="field"><span>悄悄补充 <span class="optional">选填</span></span><textarea name="note" rows="2" maxlength="1000" placeholder="比如：不怎么吃鸡肉，但手撕鸡是例外。">${esc(record?.note || '')}</textarea></label><p id="form-error" class="form-error" role="alert" hidden></p></div><footer class="dialog-footer"><span>${icon('lock')} 保存到云端</span><button type="submit" class="button primary">${icon('heart')}${record ? '保存这份了解' : '好好记住'}</button></footer></form>`;
+  dialog.innerHTML = `<form id="record-form"><header class="dialog-header"><div><span class="form-eyebrow">${icon('heart')} 又多了解 Koala一点</span><h2 id="editor-title">${record ? '把这件小事，记得更准确' : '记一件小事'}</h2></div><button type="button" class="icon-button close-button" data-action="close" aria-label="关闭编辑">${icon('close')}</button></header><div class="editor-fields"><input type="hidden" name="id" value="${esc(record?.id || '')}"><label class="field"><span>这次发现了什么 <span class="required">*</span></span><input name="title" maxlength="80" required placeholder="比如：下雨天喜欢窝着看电影" value="${esc(koalaName(record?.title || ''))}" autofocus></label><div class="form-row"><label class="field"><span>放在哪颗星球</span><select name="category">${categories.map(item => `<option value="${item.id}" ${category === item.id ? 'selected' : ''}>${item.emoji} ${item.name}</option>`).join('')}</select></label><div class="field sentiment-field"><span>Koala 的态度</span><select name="sentiment" aria-label="Koala 的态度">${Object.entries(sentiments).map(([value, label]) => `<option value="${value}" ${(record?.sentiment || (category === 'profile' ? 'profile' : category === 'habits' ? 'habit' : category === 'avoid' ? 'less' : 'love')) === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div></div><p id="category-suggestion" class="field-hint" ${editorCategoryTouched ? 'hidden' : ''}>输入标题后，会帮你建议一个分类。</p><label id="details-field" class="field" ${category === 'drinks' ? 'hidden' : ''}><span>记得更具体一点</span><textarea name="details" rows="3" maxlength="3000" placeholder="什么口味、什么场景，或者Koala特别在意的细节…">${esc(koalaName(record?.details || ''))}</textarea></label><label id="order-field" class="field" ${category !== 'drinks' ? 'hidden' : ''}><span>Koala 的专属点单 <span class="optional">每行一项</span></span><textarea name="order" rows="5" maxlength="2600" placeholder="温度：热&#10;甜度：不另外加糖&#10;奶类：巴旦木奶">${esc(record?.order ? record.order.map(pair => pair.join('：')).join('\n') : category === 'drinks' ? record?.details || '' : '')}</textarea><span class="field-hint">例如「冰量：少冰」，保存后就能一键复制点单。</span></label><label class="field"><span>悄悄补充 <span class="optional">选填</span></span><textarea name="note" rows="2" maxlength="1000" placeholder="比如：不怎么吃鸡肉，但手撕鸡是例外。">${esc(koalaName(record?.note || ''))}</textarea></label><p id="form-error" class="form-error" role="alert" hidden></p></div><footer class="dialog-footer"><span>${icon('lock')} 保存到云端</span><button type="submit" class="button primary">${icon('heart')}${record ? '保存这份了解' : '好好记住'}</button></footer></form>`;
   dialog.showModal();
   const form = dialog.querySelector('form');
   const titleInput = form.elements.title;
@@ -362,14 +359,14 @@ async function saveForm(event) {
   submit.disabled = false;
   if (!saved) return;
   closeDialogs();
-  notify(existing ? '这份了解，已经保存到云端 ♡' : '又多了解老大一点，已经保存到云端 ♡');
+  notify(existing ? '这份了解，已经保存到云端 ♡' : '又多了解 Koala一点，已经保存到云端 ♡');
 }
 
 function confirmDelete(id) {
   const record = state.records.find(item => item.id === id);
   if (!record) return;
   const dialog = document.querySelector('#confirm-dialog');
-  dialog.innerHTML = `<div class="small-dialog-body"><span class="small-illustration" aria-hidden="true">🍃</span><h2 id="confirm-title">放下这件小事？</h2><p>「${esc(record.title)}」会从记录里移除。删除后还可以立即撤销。</p></div><div class="dialog-footer"><button class="button subtle" data-action="close">再留一会儿</button><button class="button delete-button" data-action="confirm-delete" data-id="${esc(id)}">确认删除</button></div>`;
+  dialog.innerHTML = `<div class="small-dialog-body"><span class="small-illustration" aria-hidden="true">🍃</span><h2 id="confirm-title">放下这件小事？</h2><p>「${esc(koalaName(record.title))}」会从记录里移除。删除后还可以立即撤销。</p></div><div class="dialog-footer"><button class="button subtle" data-action="close">再留一会儿</button><button class="button delete-button" data-action="confirm-delete" data-id="${esc(id)}">确认删除</button></div>`;
   dialog.showModal();
 }
 
@@ -379,21 +376,21 @@ async function deleteRecord(id) {
   const saved = await saveRecords(state.records.filter(item => item.id !== id));
   if (!saved) return;
   document.querySelector('#confirm-dialog').close();
-  if (document.querySelector('#detail-dialog').open) showCategory(state.lastCategory);
+  memoryExperience.refresh();
   notify('已从云端移除这件小事', { label: '撤销', action: 'undo' }, 10000);
 }
 
 async function copyOrder(id, button) {
   const record = state.records.find(item => item.id === id);
   if (!record) return;
-  const text = `${record.title}\n${record.order?.length ? record.order.map(([label, value]) => `${label}：${value}`).join('\n') : record.details}`;
+  const text = koalaName(`${record.title}\n${record.order?.length ? record.order.map(([label, value]) => `${label}：${value}`).join('\n') : record.details}`);
   try {
     try { await navigator.clipboard.writeText(text); }
     catch {
       const textarea = document.createElement('textarea');
       textarea.value = text;
       textarea.className = 'clipboard-fallback';
-      (document.querySelector('dialog[open]') || document.body).append(textarea);
+      (document.querySelector('dialog[open]') || (memoryExperience.isOpen ? document.querySelector('#memory-stage') : document.body)).append(textarea);
       textarea.select();
       const ok = document.execCommand('copy');
       textarea.remove();
@@ -407,11 +404,11 @@ async function copyOrder(id, button) {
 }
 
 function exportBackup() {
-  const blob = new Blob([JSON.stringify({ app: 'Koala的小宇宙', version: 1, exportedAt: new Date().toISOString(), records: state.records }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ app: 'Koala 的小宇宙', version: 1, exportedAt: new Date().toISOString(), records: state.records }, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `Koala的小宇宙-${new Date().toLocaleDateString('sv-SE')}.json`;
+  link.download = `Koala 的小宇宙-${new Date().toLocaleDateString('sv-SE')}.json`;
   document.body.append(link);
   link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -442,7 +439,7 @@ function petKoala() {
   if (!mascot || !speech) return;
   const likes = state.records.filter(record => record.sentiment === 'love');
   const lines = ['摸摸头，今天也被放在心上啦 ♡', ...likes.map(record => `记得哦，我喜欢${record.title.replace(/.* · /, '')} ♡`)];
-  speech.textContent = lines[suggestionIndex++ % lines.length];
+  speech.textContent = koalaName(lines[suggestionIndex++ % lines.length]);
   mascot.classList.remove('petted');
   requestAnimationFrame(() => mascot.classList.add('petted'));
   document.querySelector('#pet-hearts').innerHTML = Array.from({ length: 6 }, (_, index) => `<span class="pet-heart" style="--x:${(index - 2.5) * 34}px;--delay:${index * 45}ms;--r:${index * 27 - 70}deg">♥</span>`).join('');
@@ -476,12 +473,12 @@ function bindOrbit() {
 }
 
 function showProfilePreview(badge) {
-  if (document.querySelector('dialog[open]')) return;
+  if (document.querySelector('dialog[open]') || memoryExperience.isOpen) return;
   const record = state.records.find(item => item.id === badge.dataset.id && item.category === 'profile');
   if (!record) return;
   const preview = document.querySelector('#hover-preview');
   const summary = [record.details, record.note].filter(Boolean).join(' · ');
-  preview.innerHTML = `<div class="preview-title">🌻 ${esc(record.title)}<span>小档案</span></div><div class="preview-item"><p>${esc(summary.slice(0, 160) || '点击查看这条小档案。')}${summary.length > 160 ? '…' : ''}</p></div><div class="preview-foot">点击查看完整记录 ${icon('chevron')}</div>`;
+  preview.innerHTML = `<div class="preview-title">🌻 ${esc(koalaName(record.title))}<span>小档案</span></div><div class="preview-item"><p>${esc(koalaName(summary.slice(0, 160) || '点击查看这条小档案。'))}${summary.length > 160 ? '…' : ''}</p></div><div class="preview-foot">点击查看完整记录 ${icon('chevron')}</div>`;
   preview.hidden = false;
   hoverSource?.removeAttribute('aria-describedby');
   hoverSource = badge;
@@ -498,12 +495,12 @@ function showProfilePreview(badge) {
 }
 
 function showPreview(card) {
-  if (document.querySelector('dialog[open]')) return;
+  if (document.querySelector('dialog[open]') || memoryExperience.isOpen) return;
   const category = categoryById(card.dataset.category);
   const records = state.records.filter(record => record.category === category.id);
   const preview = document.querySelector('#hover-preview');
   const rect = card.getBoundingClientRect();
-  preview.innerHTML = `<div class="preview-title">${category.emoji} ${category.name}<span>${records.length} 件小事</span></div>${records.slice(0, 2).map(record => `<div class="preview-item"><strong>${esc(record.title)}</strong><p>${esc(record.details || record.note || '点开记下更多细节')}</p></div>`).join('') || '<p>还没有记录，点开记下第一件小事。</p>'}<div class="preview-foot">点击查看${records.length > 2 ? `全部 ${records.length} 条` : '详情'}与编辑 ${icon('chevron')}</div>`;
+  preview.innerHTML = `<div class="preview-title">${category.emoji} ${category.name}<span>${records.length} 件小事</span></div>${records.slice(0, 2).map(record => `<div class="preview-item"><strong>${esc(koalaName(record.title))}</strong><p>${esc(koalaName(record.details || record.note || '点开记下更多细节'))}</p></div>`).join('') || '<p>还没有记录，点开记下第一件小事。</p>'}<div class="preview-foot">点击查看${records.length > 2 ? `全部 ${records.length} 条` : '详情'}与编辑 ${icon('chevron')}</div>`;
   preview.hidden = false;
   hoverSource?.removeAttribute('aria-describedby');
   hoverSource = card;
@@ -546,10 +543,11 @@ document.addEventListener('click', event => {
   if (action === 'ai-save') withAdmin(() => saveAiDrafts(Number(button.dataset.index)));
   if (action === 'ai-source') {
     const record = state.records.find(item => item.id === button.dataset.id);
-    if (record) { document.querySelector('#ai-dialog').close(); showCategory(record.category, record.id); }
+    if (record) { const origin = { element: button, rect: button.getBoundingClientRect() }; document.querySelector('#ai-dialog').close(); showCategory(record.category, record.id, origin); }
   }
-  if (action === 'category') showCategory(button.dataset.category);
-  if (action === 'profile-record') showCategory('profile', button.dataset.id);
+  if (action === 'category') showCategory(button.dataset.category, '', button);
+  if (action === 'profile-record') showCategory('profile', button.dataset.id, button);
+  if (action === 'record') { const record = state.records.find(item => item.id === button.dataset.id); if (record) showCategory(record.category, record.id, button.closest('.record-card') || button); }
   if (action === 'new') withAdmin(() => showEditor(null, button.dataset.category));
   if (action === 'edit') withAdmin(() => showEditor(state.records.find(record => record.id === button.dataset.id)));
   if (action === 'close') button.closest('dialog')?.close();
@@ -570,7 +568,7 @@ document.addEventListener('click', event => {
     next.splice(Math.min(undoRecord.index, next.length), 0, undoRecord.record);
     if (!await saveRecords(next)) return;
     undoRecord = null;
-    if (document.querySelector('#detail-dialog').open) showCategory(state.lastCategory);
+    memoryExperience.refresh();
     notify('已经从云端找回这件小事啦 ♡');
   });
 });
@@ -586,7 +584,7 @@ window.addEventListener('scroll', hidePreview, { passive: true });
 window.addEventListener('resize', hidePreview);
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') hidePreview();
-  if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) && !document.querySelector('dialog[open]')) { event.preventDefault(); openAi(); }
+  if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) && !document.querySelector('dialog[open]') && !memoryExperience.isOpen) { event.preventDefault(); openAi(); }
 });
 document.querySelectorAll('dialog').forEach(dialog => {
   dialog.addEventListener('click', event => {
@@ -610,7 +608,7 @@ document.querySelector('#import-file').addEventListener('change', async event =>
   event.target.value = '';
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && !document.querySelector('dialog[open]')) connectCloud();
+  if (!document.hidden && !document.querySelector('dialog[open]') && !memoryExperience.isOpen) connectCloud();
 });
 
 renderContent();
