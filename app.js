@@ -1,4 +1,4 @@
-import { categories, categoryById, initialRecords, sentiments, matchesQuery, suggestCategory } from './data.js?v=3';
+import { categories, categoryById, initialRecords, sentiments, matchesQuery, suggestCategory } from './data.js?v=4';
 import { loadRecords, persistRecords, readBackup, mergeBackup, validateRecords, loadLocalMigrationCandidates, retainLocalMigration, finishLocalMigration } from './store.js?v=4';
 import { icon, escapeHtml as esc } from './icons.js';
 import { fetchCloudRecords, checkAdmin, saveCloudRecords } from './api.js?v=4';
@@ -159,14 +159,28 @@ function renderContent() {
   if (!isRecords) bindOrbit();
 }
 
+function profileOrbit() {
+  const profiles = state.records.filter(record => record.category === 'profile');
+  if (!profiles.length) return '';
+  const mbti = profiles.find(record => record.id === 'koala-mbti');
+  const recent = profiles.filter(record => record !== mbti)
+    .sort((first, second) => Date.parse(second.updatedAt || '1970-01-01') - Date.parse(first.updatedAt || '1970-01-01'));
+  const ordered = mbti ? [mbti, ...recent] : recent;
+  const shown = ordered.slice(0, ordered.length > 6 ? 5 : 6);
+  const remaining = ordered.length - shown.length;
+  return `<div class="profile-orbit" role="group" aria-label="关于 Koala 的小档案">
+    ${shown.map((record, index) => `<button class="profile-orbit-badge profile-orbit-slot-${index}" data-action="profile-record" data-id="${esc(record.id)}" aria-label="查看小档案：${esc(record.title)}" aria-haspopup="dialog"><span class="profile-orbit-spark" aria-hidden="true">✦</span><span class="profile-orbit-label">${esc(record.title)}</span></button>`).join('')}
+    ${remaining ? `<button class="profile-orbit-badge profile-orbit-slot-5 profile-orbit-more" data-action="category" data-category="profile" aria-label="查看其余 ${remaining} 条小档案" aria-haspopup="dialog"><span aria-hidden="true">✦</span><span>还有 ${remaining} 条</span></button>` : ''}
+  </div>`;
+}
+
 function universeView() {
   const habitCount = count('habits');
-  const mbti = state.records.find(record => record.id === 'koala-mbti');
   return `<section class="page-intro"><div><h1>把老大的小喜好，放在心上<span class="title-period">。</span><span class="heading-heart" aria-hidden="true">♥</span></h1><p>每一件小事，都值得被好好记住。</p></div></section>
     <section class="universe" aria-label="Koala 的喜好星球">
       <div class="orbit-line orbit-one" aria-hidden="true"></div><div class="orbit-line orbit-two" aria-hidden="true"></div><div class="orbit-line orbit-three" aria-hidden="true"></div>
       <span class="spark spark-one" aria-hidden="true">✦</span><span class="spark spark-two" aria-hidden="true">✧</span><span class="spark spark-three" aria-hidden="true">♥</span><span class="spark spark-four" aria-hidden="true">✦</span>
-      <div class="koala-center"><div id="koala-speech" class="speech" aria-live="polite">今天也要好好吃饭呀！<span>♡</span></div><button class="mascot" data-action="pet" aria-label="摸摸 Koala 的头，发现一个小喜好"><img src="./assets/koala.webp" alt="拿着刀叉、戴着厨师帽的可爱考拉 Koala" width="340" height="340" draggable="false"><span id="pet-hearts" aria-hidden="true"></span></button><div class="koala-name">Koala<span>♥</span>${mbti ? `<button class="profile-chip" data-action="category" data-category="${esc(mbti.category)}" aria-label="查看${esc(mbti.title)}">${esc(mbti.title)}</button>` : ''}</div><p class="pet-hint">点击摸摸头 <span aria-hidden="true">✧</span></p></div>
+      <div class="koala-center"><div id="koala-speech" class="speech" aria-live="polite">今天也要好好吃饭呀！<span>♡</span></div><button class="mascot" data-action="pet" aria-label="摸摸 Koala 的头，发现一个小喜好"><img src="./assets/koala.webp" alt="拿着刀叉、戴着厨师帽的可爱考拉 Koala" width="340" height="340" draggable="false"><span id="pet-hearts" aria-hidden="true"></span></button>${profileOrbit()}<div class="koala-name">Koala<span>♥</span></div><p class="pet-hint">点击摸摸头 <span aria-hidden="true">✧</span></p></div>
       ${categories.slice(0, 6).map((category, index) => `<button class="planet-card ${category.color} position-${index}" data-action="category" data-category="${category.id}" aria-label="${category.name}，${count(category.id)} 条记录，点击查看详情" aria-haspopup="dialog"><div class="planet-heading"><span class="category-emoji" aria-hidden="true">${category.emoji}</span><h2>${category.name}</h2><span class="card-count">${count(category.id)}条 ${icon('chevron')}</span></div><div class="planet-summary">${categorySummary(category).map(line => `<p>${esc(line)}</p>`).join('')}</div><span class="card-open">点开看看 ${icon('chevron')}</span></button>`).join('')}
       <button class="habit-button" data-action="${habitCount ? 'category' : 'new'}" data-category="habits">${icon(habitCount ? 'book' : 'plus')}<span>${habitCount ? `生活小习惯 · ${habitCount} 件小事` : '发现一个新习惯'}</span></button>
       <p class="canvas-hint"><span class="desktop-hint">悬停探索喜好，点击收藏细节</span><span class="mobile-hint">点开小星球，看看老大的偏爱</span></p>
@@ -183,10 +197,10 @@ function recordsView() {
 
 function recordCard(record, detailed = false) {
   const category = categoryById(record.category);
-  return `<article class="record-card ${category.color} ${record.order?.length ? 'order-card' : ''}"><div class="record-top"><span class="record-category">${category.emoji} ${category.name}</span><span class="sentiment ${record.sentiment}">${record.sentiment === 'love' ? '♡ ' : ''}${sentiments[record.sentiment]}</span></div><h3>${esc(record.title)}</h3>${record.order?.length ? `<dl class="order-details">${record.order.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>` : `<p class="record-description">${esc(record.details || '还没有写下具体细节。')}</p>`}${record.note ? `<p class="record-note">${icon('heart')}<span>${esc(record.note)}</span></p>` : ''}<div class="record-bottom"><span class="record-date">${record.updatedAt ? `记于 ${new Date(record.updatedAt).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}` : '用心记住的小事'}</span><div class="record-actions">${record.category === 'drinks' ? `<button class="copy-button" data-action="copy" data-id="${esc(record.id)}" aria-label="复制${esc(record.title)}点单">${icon('copy')}<span>复制点单</span></button>` : ''}<button class="icon-button" data-action="edit" data-id="${esc(record.id)}" aria-label="编辑${esc(record.title)}">${icon('edit')}</button><button class="icon-button danger-hover" data-action="delete" data-id="${esc(record.id)}" aria-label="删除${esc(record.title)}">${icon('trash')}</button></div></div></article>`;
+  return `<article class="record-card ${category.color} ${record.order?.length ? 'order-card' : ''}" data-record-id="${esc(record.id)}"><div class="record-top"><span class="record-category">${category.emoji} ${category.name}</span><span class="sentiment ${record.sentiment}">${record.sentiment === 'love' ? '♡ ' : ''}${sentiments[record.sentiment]}</span></div><h3>${esc(record.title)}</h3>${record.order?.length ? `<dl class="order-details">${record.order.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>` : `<p class="record-description">${esc(record.details || '还没有写下具体细节。')}</p>`}${record.note ? `<p class="record-note">${icon('heart')}<span>${esc(record.note)}</span></p>` : ''}<div class="record-bottom"><span class="record-date">${record.updatedAt ? `记于 ${new Date(record.updatedAt).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}` : '用心记住的小事'}</span><div class="record-actions">${record.category === 'drinks' ? `<button class="copy-button" data-action="copy" data-id="${esc(record.id)}" aria-label="复制${esc(record.title)}点单">${icon('copy')}<span>复制点单</span></button>` : ''}<button class="icon-button" data-action="edit" data-id="${esc(record.id)}" aria-label="编辑${esc(record.title)}">${icon('edit')}</button><button class="icon-button danger-hover" data-action="delete" data-id="${esc(record.id)}" aria-label="删除${esc(record.title)}">${icon('trash')}</button></div></div></article>`;
 }
 
-function showCategory(id) {
+function showCategory(id, focusRecordId = '') {
   hidePreview();
   const category = categoryById(id);
   if (!category) return;
@@ -195,6 +209,13 @@ function showCategory(id) {
   const dialog = document.querySelector('#detail-dialog');
   dialog.innerHTML = `<header class="dialog-header ${category.color}"><div><span class="dialog-category-emoji" aria-hidden="true">${category.emoji}</span><h2 id="detail-title">${category.name}</h2><p>${category.id === 'profile' ? '关于老大的了解，都好好记在这里。' : `${records.length} 件小事，都是老大独一份的偏爱。`}</p></div><button class="icon-button close-button" data-action="close" aria-label="关闭详情">${icon('close')}</button></header><div class="detail-content">${records.length ? records.map(record => recordCard(record, true)).join('') : `<div class="empty-state"><span>🌱</span><h3>等你记下第一个小发现</h3></div>`}</div><div class="dialog-footer"><span>慢慢了解，好好记得。</span><button class="button primary" data-action="new" data-category="${id}">${icon('plus')}再记一件</button></div>`;
   if (!dialog.open) dialog.showModal();
+  if (focusRecordId) requestAnimationFrame(() => {
+    const target = [...dialog.querySelectorAll('[data-record-id]')].find(card => card.dataset.recordId === focusRecordId);
+    if (!target) return;
+    target.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    target.classList.add('record-highlight');
+    setTimeout(() => target.classList.remove('record-highlight'), 1800);
+  });
 }
 
 function closeDialogs() { document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); }
@@ -363,6 +384,38 @@ function bindOrbit() {
     card.addEventListener('focus', () => { hoverTimer = setTimeout(() => showPreview(card), 400); });
     card.addEventListener('blur', hidePreview);
   });
+  document.querySelectorAll('.profile-orbit-badge[data-id]').forEach(badge => {
+    badge.addEventListener('pointerenter', event => {
+      if (event.pointerType === 'touch') return;
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => showProfilePreview(badge), 280);
+    });
+    badge.addEventListener('pointerleave', () => { clearTimeout(hoverTimer); hoverTimer = setTimeout(hidePreview, 120); });
+    badge.addEventListener('focus', () => { hoverTimer = setTimeout(() => showProfilePreview(badge), 300); });
+    badge.addEventListener('blur', hidePreview);
+  });
+}
+
+function showProfilePreview(badge) {
+  if (document.querySelector('dialog[open]')) return;
+  const record = state.records.find(item => item.id === badge.dataset.id && item.category === 'profile');
+  if (!record) return;
+  const preview = document.querySelector('#hover-preview');
+  const summary = [record.details, record.note].filter(Boolean).join(' · ');
+  preview.innerHTML = `<div class="preview-title">🌻 ${esc(record.title)}<span>小档案</span></div><div class="preview-item"><p>${esc(summary.slice(0, 160) || '点击查看这条小档案。')}${summary.length > 160 ? '…' : ''}</p></div><div class="preview-foot">点击查看完整记录 ${icon('chevron')}</div>`;
+  preview.hidden = false;
+  hoverSource?.removeAttribute('aria-describedby');
+  hoverSource = badge;
+  badge.setAttribute('aria-describedby', 'hover-preview');
+  const rect = badge.getBoundingClientRect();
+  const width = preview.offsetWidth;
+  const height = preview.offsetHeight;
+  const left = Math.max(12, Math.min(innerWidth - width - 12, rect.left + rect.width / 2 - width / 2));
+  let top = rect.bottom + 12;
+  if (top + height > innerHeight - 12) top = rect.top - height - 12;
+  preview.style.left = `${left}px`;
+  preview.style.top = `${Math.max(12, top)}px`;
+  badge.classList.add('previewing');
 }
 
 function showPreview(card) {
@@ -410,6 +463,7 @@ document.addEventListener('click', event => {
   if (action === 'home') { event.preventDefault(); state.view = 'universe'; clearSearch(); }
   if (action === 'view') { state.view = button.dataset.view; clearSearch(); }
   if (action === 'category') showCategory(button.dataset.category);
+  if (action === 'profile-record') showCategory('profile', button.dataset.id);
   if (action === 'new') withAdmin(() => showEditor(null, button.dataset.category));
   if (action === 'edit') withAdmin(() => showEditor(state.records.find(record => record.id === button.dataset.id)));
   if (action === 'close') button.closest('dialog')?.close();

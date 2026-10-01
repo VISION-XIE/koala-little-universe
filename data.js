@@ -6,7 +6,7 @@ export const categories = [
   { id: 'dairy', name: '奶香与面包', emoji: '🥖', color: 'lavender', summary: ['希腊酸奶 · 楼下酸奶', '无糖牛奶 · 硬欧 · 恰巴塔'], aliases: '牛奶 面包 酸奶 乳制品 早餐 碳水' },
   { id: 'avoid', name: '小小避雷区', emoji: '🙅🏻‍♀️', color: 'rose', summary: ['不怎么吃鸡鸭鹅', '手撕鸡是例外'], aliases: '讨厌 不喜欢 避雷 不吃 禁忌 忌口' },
   { id: 'habits', name: '生活小习惯', emoji: '🌷', color: 'green', summary: [], aliases: '习惯 行为 日常 生活 爱好 兴趣' },
-  { id: 'profile', name: '关于 Koala', emoji: '🌻', color: 'yellow', summary: [], aliases: 'MBTI ESFJ 人格 性格 个人资料 小档案' },
+  { id: 'profile', name: '关于 Koala', emoji: '🌻', color: 'yellow', summary: [], aliases: 'MBTI ESFJ 人格 性格 生日 星座 家人 宠物 个人资料 小档案 基础信息' },
 ];
 
 const seed = (id, category, title, details, extras = {}) => ({ id, category, title, details, sentiment: 'love', note: '', createdAt: null, updatedAt: null, ...extras });
@@ -36,7 +36,7 @@ export const sentiments = { love: '喜欢', less: '不太喜欢', dislike: '不�
 export const categoryById = id => categories.find(category => category.id === id);
 
 export function suggestCategory(text) {
-  if (/MBTI|ESFJ|人格|性格/i.test(text)) return 'profile';
+  if (/MBTI|ESFJ|人格|性格|生日|出生|星座|年龄|身高|血型|家人|家庭|弟弟|妹妹|哥哥|姐姐|宠物|小档案|基础信息|个人资料/i.test(text)) return 'profile';
   if (/不喜欢|讨厌|不怎么|不能吃|不吃|忌口/.test(text)) return 'avoid';
   if (/咖啡|奶茶|星巴克|馥芮白|茶底|拿铁|一点点|1点点/.test(text)) return 'drinks';
   if (/酸奶|牛奶|面包|硬欧|恰巴塔|吐司/.test(text)) return 'dairy';

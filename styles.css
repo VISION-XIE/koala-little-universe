@@ -26,3 +26,21 @@ dialog{position:fixed;padding:0;border:1px solid #e9dac9;border-radius:26px;back
 #admin-dialog .field input{width:100%;margin-top:8px;padding:12px 14px;border:1px solid #e8d7c5;border-radius:12px;background:#fffdf9}
 #admin-dialog .form-error{margin-top:10px}
 @media(max-width:700px){.site-footer{padding-left:16px;padding-right:16px;align-items:flex-start}.footer-actions{gap:6px 15px}}
+
+/* The little profile notes orbit Koala and stay readable on narrow screens. */
+.profile-orbit{position:absolute;inset:0;z-index:3;pointer-events:none}
+.profile-orbit-badge{position:absolute;display:flex;align-items:center;justify-content:center;gap:5px;width:120px;min-height:42px;padding:8px 11px;border:2px solid #fffdf8;border-radius:15px;background:#f9eccd;color:#795e3e;box-shadow:0 5px 16px #7753391c,0 0 0 1px #d4b78b55;font-size:.76rem;font-weight:650;line-height:1.35;letter-spacing:.1px;pointer-events:auto;transform:rotate(var(--badge-tilt,0deg));transition:transform .2s,box-shadow .2s,background .2s}
+.profile-orbit-badge:hover,.profile-orbit-badge:focus-visible,.profile-orbit-badge.previewing{z-index:5;background:#fff5dd;transform:translateY(-4px) rotate(0deg);box-shadow:0 10px 22px #77533928,0 0 0 1px #d4b78b88}
+.profile-orbit-spark{flex:none;color:#d59464;font-size:.84rem}.profile-orbit-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.profile-orbit-slot-0{left:-45px;top:102px;--badge-tilt:-7deg}
+.profile-orbit-slot-1{right:-48px;top:114px;--badge-tilt:6deg;background:#fce7e3}
+.profile-orbit-slot-2{left:-58px;top:209px;--badge-tilt:5deg;background:#eaf1dc}
+.profile-orbit-slot-3{right:-59px;top:218px;--badge-tilt:-6deg;background:#eee8f6}
+.profile-orbit-slot-4{left:-32px;top:303px;--badge-tilt:-5deg;background:#fce8dc}
+.profile-orbit-slot-5{right:-36px;top:310px;--badge-tilt:5deg;background:#f5ebd8}
+.profile-orbit-more{font-size:.72rem;color:#80664e}
+.record-highlight{outline:3px solid #e5b987;outline-offset:2px;box-shadow:0 0 0 7px #f8e9d2a8!important;transition:box-shadow .25s}
+@media(max-width:1190px){.profile-orbit-badge{width:108px;min-height:40px;padding:7px 8px;font-size:.69rem}.profile-orbit-slot-0{left:-35px}.profile-orbit-slot-1{right:-37px}.profile-orbit-slot-2{left:-43px;top:190px}.profile-orbit-slot-3{right:-45px;top:199px}.profile-orbit-slot-4{left:-30px;top:274px}.profile-orbit-slot-5{right:-31px;top:283px}}
+@media(max-width:960px){.profile-orbit-badge{width:96px;min-height:37px;font-size:.65rem}.profile-orbit-slot-0{left:-26px;top:103px}.profile-orbit-slot-1{right:-27px;top:112px}.profile-orbit-slot-2{left:-35px;top:180px}.profile-orbit-slot-3{right:-35px;top:190px}.profile-orbit-slot-4{left:-22px;top:259px}.profile-orbit-slot-5{right:-23px;top:269px}}
+@media(max-width:700px){.profile-orbit-badge{width:94px;min-height:39px;padding:7px;font-size:.65rem}.profile-orbit-slot-0{left:max(0px,calc(50% - 180px));top:104px}.profile-orbit-slot-1{right:max(0px,calc(50% - 180px));top:112px}.profile-orbit-slot-2{left:max(0px,calc(50% - 180px));top:180px}.profile-orbit-slot-3{right:max(0px,calc(50% - 180px));top:189px}.profile-orbit-slot-4{left:max(0px,calc(50% - 180px));top:256px}.profile-orbit-slot-5{right:max(0px,calc(50% - 180px));top:266px}}
+@media(max-width:380px){.profile-orbit-badge{width:86px;font-size:.61rem;min-height:37px}}
